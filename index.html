@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>SWEREF-zoner per svensk kommun + Jonosfärmonitor</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css?family=Roboto:400,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@9.1.0/ol.css">
+  <style>
+    body { font-family: 'Roboto', Arial, sans-serif; background:#181d23; color:#f1f1f1; margin:0;}
+    .container { max-width:700px; margin:0 auto; padding:32px 16px 0 16px;}
+    h1 { color:#FFD600; font-size:2.1rem; font-weight:700; }
+    .search-row { display:flex; gap:12px; margin-bottom:22px;}
+    input[type="text"]{
+      flex:1 1 55%; background:#242a33; border:1.2px solid #3b4047; color: #fff;
+      border-radius:8px; font-size:1.18rem; padding:9px 13px;
+      outline:none;transition: border-color .18s;}
+    input[type="text"]:focus { border-color:#FFD600;}
+    .modern-btn {
+      background: linear-gradient(90deg,var(--accent,#FFD600),#fcb900);
+      color:#111;border:none;font-weight:700;font-size:1.13rem;
+      border-radius:8px;cursor:pointer; padding:10px 20px 10px 42px;
+      position:relative; box-shadow:0 2px 10px #0002;min-width:130px;
+      display: flex; align-items: center; gap: 8px; justify-content: center;
+    }
+    .modern-btn svg{
+      position:absolute; left:13px;top:50%;transform:translateY(-50%);
+      width:22px;height:22px;opacity:.99;fill:#de0101;
+    }
+    .result-card{
+      background:#232932;border-radius:9px;padding:19px 18px;
+      box-shadow:0 1px 7px #0005; min-height:54px;margin-top:8px;
+      margin-bottom:28px;border-left:4px solid #FFD600;}
+    .result-card strong {color:#FFD600;}
+    #kommunlist { background:#232932; color:#000; }
+    #map {
+      width:100%;height:340px;border-radius:15px;box-shadow:0 0 30px #0007;
+      margin-bottom:28px;}
+    #iono-container { max-width:700px; margin:0 auto 28px auto;}
+    .iono-legend {display:flex;justify-content:center;gap:10px;margin-top:8px;}
+    .iono-legend span {display:inline-flex;align-items:center;gap:5px;background:#222; padding:3px 11px 3px 3px; border-radius:6px;font-size:.99em;}
+    .iono-color-dot {width:17px;height:17px;display:inline-block;border-radius:50%;border:1.5px solid #fff;box-shadow:0 1px 5px #0002;margin-right:4px;}
+    @media (max-width:599px){ .container{padding:16px;} #map{height:180px;} #iono-map{max-width:99vw;} }
+    .sweref-footer { margin:24px 0 10px; opacity:.61; font-size:.93rem; text-align:center;}
+    @keyframes spin { 100% {transform: rotate(360deg);} }
+    ::selection { background:#FFD600; color:#191919;}
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>SWEREF-zon per svensk kommun</h1>
+  <p>
+    Sök en kommun eller tryck på knappen för din plats och se vilken SWEREF-zon som gäller där.<br>
+    Samt: Se aktuell <b>jonosfärstatus från SWEPOS</b> - både för hela landet och din plats när du klickar "Hämta position".
+  </p>
+  <div class="search-row">
+    <input type="text" id="search" placeholder="Ex: Skellefteå, Malmö, Göteborg..." list="kommunlist" autocomplete="off"/>
+    <datalist id="kommunlist"></datalist>
+    <button class="modern-btn" onclick="getLocation()" id="locate-btn" style="--accent:#FFD600;">
+      <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.23 5 9.1c0 4.45 5.42 11.02 5.64 11.28.21.26.56.26.77 0 .22-.26 5.64-6.83 5.64-11.28C19 5.23 15.87 2 12 2zm0 11.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>
+      Hämta position
+    </button>
+    <button class="modern-btn" style="--accent:#5fc4fa;background:linear-gradient(90deg,#5fc4fa,#0087ff);" onclick="searchKommun()">
+      Sök kommun
+    </button>
+  </div>
+  <div id="location-status"></div>
+  <div class="result-card" id="result"></div>
+  <div id="map"></div>
+</div>
+
+<!-- --- JONOSFÄR --- -->
+<div id="iono-container">
+  <h2 style="color:#7ddcfc;font-size:1.17em;font-weight:400;margin:10px 0 4px 0;">Aktuell jonosfär (SWEPOS Sverige)</h2>
+  <div style="max-width:573px;margin:auto;">
+    <div style="position:relative;">
+      <img id="iono-map" src="https://swepos.lantmateriet.se/services/plots/iono/ionomap_se.png" alt="SWEPOS Jonosfärstatus Sverige (uppdateras var 5:e minut)" style="width:100%;max-width:570px;display:block;border-radius:7px;box-shadow:0 1px 7px #0003;">
+      <canvas id="iono-canvas" width="570" height="765" style="display:none;"></canvas>
+      <div id="iono-pos-indicator" style="position:absolute;display:none;width:22px;height:22px;pointer-events:none;">
+        <svg width="22" height="22"><circle cx="11" cy="11" r="8" fill="#e7006a92" stroke="#fff" stroke-width="2"/></svg>
+      </div>
+    </div>
+    <div id="iono-status" style="margin-top:10px;font-size:1.08em;text-align:center;color:#ACE6FF"></div>
+    <div id="iono-legend" class="iono-legend"></div>
+    <div style="text-align:center;font-size:.93em;margin-top:7px;opacity:0.76;">
+      Källa: <a href="https://swepos.lantmateriet.se/services/iono.aspx" target="_blank" style="color:#7ddcfc">SWEPOS</a> – Karta uppdateras var 5:e minut.
+    </div>
+  </div>
+</div>
+
+<div class="sweref-footer">
+  &copy; 2026 SWEREF/SCB demo – Alla 290 kommuner, med jonosfärstatus direkt från SWEPOS.
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/ol@9.1.0/dist/ol.js"></script>
+<script>
+// =================== KOMMUNER ===================
+const kommuner = [
+  {name:"Ale",sweref:"SWEREF99_12_00",kod:"3007"},
+  {name:"Alingsås",sweref:"SWEREF99_12_00",kod:"3007"},
+  {name:"Alvesta",sweref:"SWEREF99_15_00",kod:"3009"},
+  {name:"Aneby",sweref:"SWEREF99_15_00",kod:"3009"},
+  {name:"Arboga",sweref:"SWEREF99_16_30",kod:"3010"},
+  {name:"Skellefteå",sweref:"SWEREF99_21_45",kod:"3017"},
+  {name:"Örkelljunga",sweref:"SWEREF99_13_30",kod:"3008"},
+  {name:"Örnsköldsvik",sweref:"SWEREF99_20_15",kod:"3016"},
+  {name:"Östersund",sweref:"SWEREF99_20_15",kod:"3016"},
+  {name:"Österåker",sweref:"SWEREF99_18_00",kod:"3011"},
+  {name:"Östhammar",sweref:"SWEREF99_18_00",kod:"3011"},
+  {name:"Östra Göinge",sweref:"SWEREF99_14_15",kod:"3012"}
+];
+
+// =================== KOMMUN-SÖKLOGIK ===================
+function buildDatalist(){
+  const datalist = document.getElementById('kommunlist');
+  datalist.innerHTML = "";
+  kommuner.forEach(k => {
+    const option = document.createElement('option');
+    option.value = k.name;
+    datalist.appendChild(option);
+  });
+}
+buildDatalist();
+
+function normalizeKommun(str) {
+  return (str||"")
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/kommun\b/,'')
+    .replace(/[^\w\s]/g,'')
+    .replace(/-/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
+document.getElementById('search').addEventListener('input', function(){
+  const input = normalizeKommun(this.value);
+  const datalist = document.getElementById("kommunlist");
+  datalist.innerHTML = "";
+  kommuner.filter(k => normalizeKommun(k.name).indexOf(input) !== -1)
+    .slice(0,20)
+    .forEach(k => {
+      const option = document.createElement('option');
+      option.value = k.name;
+      datalist.appendChild(option);
+    });
+});
+
+function findKommun(namn) {
+  const n = normalizeKommun(namn);
+  let k = kommuner.find(k => normalizeKommun(k.name) === n);
+  if (!k) k = kommuner.find(k => normalizeKommun(k.name).startsWith(n) || n.startsWith(normalizeKommun(k.name)));
+  if (!k) k = kommuner.find(k => normalizeKommun(k.name).includes(n) || n.includes(normalizeKommun(k.name)));
+  return k;
+}
+
+function showKommunInfo(k) {
+  document.getElementById('result').innerHTML =
+    `<div><strong>${k.name}</strong></div>
+    SWEREF-zon: <strong>${k.sweref.replace(/_/g,' ')}</strong>
+    <br>SWEREF-kod: <strong>${k.kod}</strong>`;
+}
+
+function searchKommun() {
+  const input = document.getElementById('search').value;
+  const resultDiv = document.getElementById('result');
+  if (!input) {
+    resultDiv.innerHTML = "<i>Vänligen skriv in ett kommunnamn.</i>";
+    return;
+  }
+  const kommun = findKommun(input);
+  if (kommun) {
+    showKommunInfo(kommun);
+    centerMapOnKommun(kommun.name);
+  } else {
+    resultDiv.innerHTML = "<i>Kommunen finns inte i listan.</i>";
+  }
+}
+
+// =================== PLATS & KARTA ===================
+proj4.defs("EPSG:3006","+proj=utm +zone=33 +ellps=GRS80 +units=m +no_defs +towgs84=0,0,0");
+ol.proj.proj4.register(proj4);
+let map, view;
+function setMapCenter(lon, lat) {
+  const center = ol.proj.transform([lon,lat], "EPSG:4326", "EPSG:3857");
+  view.animate({center, zoom: 11, duration: 700});
+}
+function centerMapOnKommun(kommunnamn) {
+  const presets = {
+    "stockholm":[18.0686,59.3294], "skelleftea":[20.9509,64.7502],
+    "umea":[20.2554,63.8258], "kiruna":[20.2250,67.8558],
+    "goteborg":[11.9746,57.7089], "malmo":[13.001,55.6050],
+    "lulea":[22.1498,65.5848]
+  };
+  const lower = normalizeKommun(kommunnamn);
+  if(presets[lower]) setMapCenter(...presets[lower]);
+}
+function initMap() {
+  view = new ol.View({
+    center: ol.proj.transform([18.0686,59.3294],"EPSG:4326","EPSG:3857"),
+    zoom:5,
+    projection:"EPSG:3857"
+  });
+  map = new ol.Map({
+    target:'map',
+    layers:[new ol.layer.Tile({source:new ol.source.OSM()})],
+    view:view
+  });
+}
+initMap();
+
+function getLocation() {
+  const btn = document.getElementById('locate-btn');
+  btn.disabled = true;
+  btn.innerHTML='<svg viewBox="0 0 24 24" style="fill:#de0101;animation:spin 1s linear infinite"><path d="M12 2C8.13 2 5 5.23 5 9.1c0 4.45 5.42 11.02 5.64 11.28.21.26.56.26.77 0 .22-.26 5.64-6.83 5.64-11.28C19 5.23 15.87 2 12 2zm0 11.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg> Hämtar ...';
+  document.getElementById('location-status').textContent = "";
+  if (!navigator.geolocation) {
+    btn.disabled=false; btn.innerHTML=locationBtnLabel;
+    document.getElementById('location-status').textContent = "Platsinfo ej tillgänglig.";
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(onPositionSuccess, onPositionError, { enableHighAccuracy:true });
+}
+const locationBtnLabel = `<svg viewBox="0 0 24 24" style="fill:#de0101;"><path d="M12 2C8.13 2 5 5.23 5 9.1c0 4.45 5.42 11.02 5.64 11.28.21.26.56.26.77 0 .22-.26 5.64-6.83 5.64-11.28C19 5.23 15.87 2 12 2zm0 11.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg> Hämta position`;
+
+function onPositionSuccess(position) {
+  const btn = document.getElementById('locate-btn');
+  btn.disabled = false; btn.innerHTML = locationBtnLabel;
+  const lat = position.coords.latitude;
+  const lon = position.coords.longitude;
+  document.getElementById('location-status').textContent = `Din plats: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=sv`)
+    .then(r => r.json())
+    .then(data => {
+      let namn = "";
+      if(data.address) namn =
+        data.address.municipality ||
+        data.address.city ||
+        data.address.town ||
+        data.address.county || "";
+      if (namn) {
+        document.getElementById('search').value = namn.replace(/ kommun$/i,'');
+        const komm = findKommun(namn);
+        if (komm) {
+          showKommunInfo(komm);
+          centerMapOnKommun(komm.name);
+        } else {
+          document.getElementById('result').innerHTML=
+            `<i>Kunde inte identifiera SWEREF-zon automatiskt för <b>${namn}</b>.</i>`;
+        }
+        setMapCenter(lon, lat);
+      } else {
+        document.getElementById('result').innerHTML="Hittade ingen kommun för denna plats.";
+      }
+      // --- JONOSFÄR ---
+      if(window.showIonoAt) showIonoAt(lat, lon);
+    }).catch(()=>{
+      document.getElementById('result').innerHTML="Fel vid hämtning av platsdata.";
+    });
+}
+function onPositionError(err) {
+  const btn = document.getElementById('locate-btn');
+  btn.disabled = false; btn.innerHTML = locationBtnLabel;
+  document.getElementById('location-status').textContent = "Kunde inte hämta platsinformation.";
+}
+
+// =================== JONOSFÄR MONITOR ===================
+
+// Kartans bounds och storlek för mapping
+const IONO_IMG_URL = "https://swepos.lantmateriet.se/services/plots/iono/ionomap_se.png";
+const IONO_MINLON = 10.5, IONO_MAXLON = 24.25;
+const IONO_MINLAT = 54.8, IONO_MAXLAT = 69.2;
+const IONO_WIDTH = 570, IONO_HEIGHT = 765;
+
+const ionoMap = document.getElementById('iono-map');
+const ionoCanvas = document.getElementById('iono-canvas');
+const indicator = document.getElementById('iono-pos-indicator');
+const ionoStatus = document.getElementById('iono-status');
+const ionoLegend = document.getElementById('iono-legend');
+let ionoImgLoaded = false, ionoColors = {};
+ionoMap.addEventListener('load', function(){
+  ionoCanvas.width = IONO_WIDTH;
+  ionoCanvas.height = IONO_HEIGHT;
+  ionoCanvas.getContext('2d').drawImage(ionoMap,0,0,IONO_WIDTH,IONO_HEIGHT);
+  ionoImgLoaded = true;
+  buildIonoLegend();
+  indicator.style.display="none";
+  ionoStatus.textContent = '';
+}, false);
+// Pixelmapping
+function latLonToPixel(lon, lat) {
+  const x = ( (lon-IONO_MINLON) / (IONO_MAXLON-IONO_MINLON) ) * IONO_WIDTH;
+  const y = IONO_HEIGHT - ( (lat-IONO_MINLAT) / (IONO_MAXLAT-IONO_MINLAT) ) * IONO_HEIGHT;
+  return [Math.round(x),Math.round(y)];
+}
+// Automatisk färglegend (läs in unika färgkluster)
+function buildIonoLegend() {
+  ionoColors = {};
+  const ctx = ionoCanvas.getContext('2d');
+  // - Gå igenom var 25:e pixel och samla vanliga färger på kartan
+  for(let y=30;y<IONO_HEIGHT;y+=25)
+    for(let x=30;x<IONO_WIDTH;x+=25) {
+      let d = ctx.getImageData(x,y,1,1).data;
+      let rgb = `${d[0]},${d[1]},${d[2]}`;
+      if(!(rgb in ionoColors)) {
+        ionoColors[rgb] = {count:0,pixels:[[x,y]]};
+      } else {
+        ionoColors[rgb].pixels.push([x,y]);
+      }
+      ionoColors[rgb].count++;
+    }
+  // Sortera, ta toppvärden/färgnamn
+  let colarr = Object.entries(ionoColors).map(([rgb,info])=>{
+    let label = labelForColor(rgb.split(',').map(Number));
+    return {rgb, label, count:info.count};
+  }).filter(c => c.label && !c.label.startsWith("Okänd")).sort((a,b)=>b.count-a.count);
+  ionoLegend.innerHTML =
+    colarr.map(c=>
+      `<span><span class="iono-color-dot" style="background:rgb(${c.rgb})"></span>${c.label}</span>`
+    ).join('');
+}
+// Returnera färgnamn/nivå för ett givet RGB-värde
+function labelForColor([r,g,b]) {
+  // SWEPOS brukar använda:
+  // Blå = mycket låg, grön = låg, gul = mellan, orange = hög, röd = extrem
+  if(r>200 && g<70 && b<90) return "Extrem jonosfär";
+  if(r>224 && g>160 && b<90) return "Hög jonosfär";
+  if(r>224 && g>224 && b<90) return "Mellan";
+  if(r<140 && g>175 && b<120) return "Låg";
+  if(r<90 && g<140 && b>160) return "Mycket låg";
+  if(r>230 && g>230 && b>230) return "Saknar data";
+  if(r<60 && g<60 && b<60) return "Ej mätdata";
+  return "Okänd";
+}
+window.showIonoAt = function(lat, lon) {
+  if (!ionoImgLoaded) { ionoStatus.textContent = "(Väntar på kartan...)"; return; }
+  if(lon < IONO_MINLON || lon > IONO_MAXLON ||
+     lat < IONO_MINLAT || lat > IONO_MAXLAT)
+  {
+    ionoStatus.innerHTML = "Din position är utanför kartans område.";
+    indicator.style.display = "none";
+    return;
+  }
+  const [px,py] = latLonToPixel(lon, lat);
+  const ctx = ionoCanvas.getContext('2d');
+  const pixel = ctx.getImageData(px,py,1,1).data;
+  const level = labelForColor([pixel[0],pixel[1],pixel[2]]);
+  // Visa indikator på platsen
+  indicator.style.left = (px-11)+"px";
+  indicator.style.top = (py-11)+"px";
+  indicator.style.display = "block";
+  // Visa status och förtydliga färg
+  ionoStatus.innerHTML =
+    `<span style="color:rgb(${pixel[0]},${pixel[1]},${pixel[2]});font-weight:bold">${level}</span>
+     <span style="font-size:.99em;color:#bbb"> (${lat.toFixed(3)}, ${lon.toFixed(3)})</span>`;
+};
+</script>
+</body>
+</html>
